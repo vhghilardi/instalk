@@ -47,15 +47,7 @@
             console.log('✅ Interface básica renderizada');
         }
         
-        // 5. Atualizar estatísticas
-        const totalEl = document.getElementById('totalInstances');
-        const connectedEl = document.getElementById('connectedInstances');
-        const disconnectedEl = document.getElementById('disconnectedInstances');
-        
-        if (totalEl) totalEl.textContent = '0';
-        if (connectedEl) connectedEl.textContent = '0';
-        if (disconnectedEl) disconnectedEl.textContent = '0';
-        
+        // 5. Não alterar estatísticas já renderizadas
         console.log('🎉 SPINNER REMOVIDO COM SUCESSO!');
     }
     

@@ -2,6 +2,31 @@
 let instances = [];
 let apiToken = '';
 
+// Gerenciamento de token no cliente
+function getStoredToken() {
+    try {
+        return localStorage.getItem('apiToken') || '';
+    } catch (e) {
+        return '';
+    }
+}
+
+function setStoredToken(token) {
+    try {
+        localStorage.setItem('apiToken', token);
+    } catch (e) {
+        // ignore
+    }
+}
+
+function clearStoredToken() {
+    try {
+        localStorage.removeItem('apiToken');
+    } catch (e) {
+        // ignore
+    }
+}
+
 // Inicializar quando a página carregar
 document.addEventListener('DOMContentLoaded', function() {
     console.log('🚀 Inicializando dashboard...');
@@ -15,13 +40,9 @@ document.addEventListener('DOMContentLoaded', function() {
     // Configurar event listeners
     setupEventListeners();
     
-    // Carregar token e instâncias
-    loadApiToken().then(() => {
-        console.log('✅ Token carregado, carregando instâncias...');
-        loadInstances();
-    }).catch(error => {
-        console.error('❌ Erro ao carregar token:', error);
-        // Mesmo com erro no token, tentar carregar instâncias
+    // Exigir token antes de prosseguir
+    ensureToken().then(() => {
+        console.log('✅ Token disponível, carregando instâncias...');
         loadInstances();
     });
 });
@@ -79,26 +100,56 @@ function setupEventListeners() {
     console.log('✅ Event listeners configurados');
 }
 
-// Carregar token da API
-async function loadApiToken() {
-    try {
-        const response = await fetch('/api/token');
-        if (response.ok) {
-            const data = await response.json();
-            if (data.success && data.token) {
-                apiToken = data.token;
-                console.log('✅ Token carregado com sucesso');
-            } else {
-                throw new Error('Token não encontrado na resposta');
-            }
-        } else {
-            throw new Error(`Erro HTTP ${response.status}`);
+// Garantir que o token seja informado pelo usuário
+function ensureToken() {
+    return new Promise((resolve) => {
+        const existing = getStoredToken();
+        if (existing) {
+            apiToken = existing;
+            return resolve();
         }
-    } catch (error) {
-        console.warn('⚠️ Não foi possível obter token do servidor:', error.message);
-        console.log('🔄 Usando token padrão...');
-        apiToken = 'instagram-manager-token';
-    }
+
+        const modalEl = document.getElementById('apiTokenModal');
+        const modal = new bootstrap.Modal(modalEl);
+        const input = document.getElementById('apiTokenInput');
+        const saveBtn = document.getElementById('saveApiTokenBtn');
+        const clearBtn = document.getElementById('clearTokenBtn');
+
+        input.value = '';
+
+        function trySave() {
+            const value = (input.value || '').trim();
+            if (!value) {
+                showError('Informe um token válido');
+                return;
+            }
+            apiToken = value;
+            setStoredToken(value);
+            saveBtn.removeEventListener('click', trySave);
+            input.removeEventListener('keydown', onKey);
+            clearBtn?.removeEventListener('click', onClear);
+            modal.hide();
+            resolve();
+        }
+
+        function onKey(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                trySave();
+            }
+        }
+
+        function onClear() {
+            clearStoredToken();
+            input.value = '';
+            input.focus();
+        }
+
+        saveBtn.addEventListener('click', trySave);
+        input.addEventListener('keydown', onKey);
+        if (clearBtn) clearBtn.addEventListener('click', onClear);
+        modal.show();
+    });
 }
 
 // Carregar instâncias
@@ -134,6 +185,11 @@ async function loadInstances() {
         if (!response.ok) {
             const errorData = await response.json().catch(() => ({}));
             console.error('❌ Erro da API:', errorData);
+            if (response.status === 401) {
+                showError('Token inválido ou ausente. Informe o token novamente.');
+                await promptForTokenAndRetry();
+                return; // interrompe fluxo atual; nova tentativa acontecerá
+            }
             throw new Error(errorData.error || `Erro HTTP ${response.status}`);
         }
         
@@ -145,7 +201,8 @@ async function loadInstances() {
         
     } catch (error) {
         console.error('❌ Erro ao carregar instâncias:', error);
-        instances = [];
+        // Não sobrescrever as instâncias já carregadas em caso de erro de rede/API
+        // Mantemos o último estado conhecido para não zerar os contadores
         
         if (error.name === 'AbortError') {
             console.log('⏰ Timeout atingido - continuando sem dados');
@@ -162,6 +219,54 @@ async function loadInstances() {
         hideLoading();
         console.log('✅ Interface carregada!');
     }
+}
+
+async function promptForTokenAndRetry() {
+    await new Promise((resolve) => {
+        const modalEl = document.getElementById('apiTokenModal');
+        const modal = new bootstrap.Modal(modalEl);
+        const input = document.getElementById('apiTokenInput');
+        const saveBtn = document.getElementById('saveApiTokenBtn');
+        const clearBtn = document.getElementById('clearTokenBtn');
+
+        input.value = '';
+
+        function trySave() {
+            const value = (input.value || '').trim();
+            if (!value) {
+                showError('Informe um token válido');
+                return;
+            }
+            apiToken = value;
+            setStoredToken(value);
+            saveBtn.removeEventListener('click', trySave);
+            input.removeEventListener('keydown', onKey);
+            clearBtn?.removeEventListener('click', onClear);
+            modal.hide();
+            resolve();
+        }
+
+        function onKey(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                trySave();
+            }
+        }
+
+        function onClear() {
+            clearStoredToken();
+            input.value = '';
+            input.focus();
+        }
+
+        saveBtn.addEventListener('click', trySave);
+        input.addEventListener('keydown', onKey);
+        if (clearBtn) clearBtn.addEventListener('click', onClear);
+        modal.show();
+    });
+
+    // Depois que o usuário salvar, tentar novamente
+    loadInstances();
 }
 
 // Renderizar lista de instâncias
@@ -259,9 +364,11 @@ function setupDynamicEventListeners() {
 
 // Atualizar estatísticas
 function updateStatistics() {
-    const total = instances.length;
-    const connected = instances.filter(i => i.status === 'connected').length;
-    const disconnected = total - connected;
+    // Considerar apenas instâncias ativas, quando a flag existir
+    const activeInstances = instances.filter(i => i.isActive !== false);
+    const total = activeInstances.length;
+    const connected = activeInstances.filter(i => i.status === 'connected').length;
+    const disconnected = Math.max(total - connected, 0);
 
     document.getElementById('totalInstances').textContent = total;
     document.getElementById('connectedInstances').textContent = connected;
@@ -439,29 +546,15 @@ async function deleteInstance(instanceId) {
 
 // Mostrar token da API
 function showApiToken() {
-    document.getElementById('apiToken').value = apiToken;
+    const input = document.getElementById('apiTokenInput');
     const modal = new bootstrap.Modal(document.getElementById('apiTokenModal'));
+    const stored = getStoredToken();
+    input.value = stored || '';
     modal.show();
 }
 
 // Copiar token para área de transferência
-function copyToken() {
-    const tokenInput = document.getElementById('apiToken');
-    tokenInput.select();
-    tokenInput.setSelectionRange(0, 99999); // Para mobile
-    
-    try {
-        document.execCommand('copy');
-        showSuccess('Token copiado para a área de transferência!');
-    } catch (err) {
-        // Fallback para navegadores modernos
-        navigator.clipboard.writeText(tokenInput.value).then(() => {
-            showSuccess('Token copiado para a área de transferência!');
-        }).catch(() => {
-            showError('Erro ao copiar token');
-        });
-    }
-}
+function copyToken() { /* não utilizado com novo modal */ }
 
 // Atualizar instâncias
 function refreshInstances() {

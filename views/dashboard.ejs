@@ -13,7 +13,7 @@
     <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
         <div class="container-fluid">
             <a class="navbar-brand" href="/">
-                <i class="fas fa-instagram me-2"></i>Instagram Manager
+                <i class="fa-brands fa-instagram me-2"></i>Instagram Manager
             </a>
             
             <div class="navbar-nav ms-auto">
@@ -164,26 +164,27 @@
         </div>
     </div>
 
-    <!-- Modal: Token da API -->
-    <div class="modal fade" id="apiTokenModal" tabindex="-1">
+    <!-- Modal: Informar Token da API (bloqueante) -->
+    <div class="modal fade" id="apiTokenModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false">
         <div class="modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title">Token da API</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    <h5 class="modal-title">Informe o Token da API</h5>
                 </div>
                 <div class="modal-body">
-                    <p>Use este token para acessar a API:</p>
+                    <p class="mb-2">Cole abaixo o seu token de acesso para usar o painel.</p>
                     <div class="input-group">
-                        <input type="text" class="form-control" id="apiToken" readonly>
-                        <button class="btn btn-outline-secondary" type="button" id="copyTokenBtn">
-                            <i class="fas fa-copy"></i> Copiar
+                        <input type="text" class="form-control" id="apiTokenInput" placeholder="Insira o token da API">
+                        <button class="btn btn-outline-secondary" type="button" id="clearTokenBtn" title="Limpar token salvo">
+                            <i class="fas fa-eraser"></i>
                         </button>
                     </div>
-                    <small class="text-muted">Este token é necessário para todas as requisições à API.</small>
+                    <small class="text-muted d-block mt-2">O token é obrigatório para todas as requisições à API.</small>
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Fechar</button>
+                    <button type="button" class="btn btn-primary" id="saveApiTokenBtn">
+                        <i class="fas fa-check"></i> Salvar token
+                    </button>
                 </div>
             </div>
         </div>
