@@ -106,21 +106,6 @@ app.get('/api/instances', requireTokenAuth, async (req, res) => {
     }
 });
 
-// Obter instância específica
-app.get('/api/instances/:instanceId', requireTokenAuth, async (req, res) => {
-    try {
-        const instance = await instanceManager.getInstance(req.params.instanceId);
-        if (instance) {
-            res.json({ success: true, instance: instance });
-        } else {
-            res.status(404).json({ success: false, error: 'Instância não encontrada' });
-        }
-    } catch (error) {
-        console.error('Erro ao obter instância:', error);
-        res.status(500).json({ success: false, error: 'Erro interno do servidor' });
-    }
-});
-
 // Criar nova instância
 app.post('/api/instances', requireTokenAuth, async (req, res) => {
     try {
@@ -209,6 +194,18 @@ app.get('/api/instances/:instanceId/threads/:threadId/messages', requireTokenAut
     }
 });
 
+// Obter uma mensagem específica por ID (inclui dados de mídia quando houver)
+app.get('/api/instances/:instanceId/threads/:threadId/messages/:messageId', requireTokenAuth, async (req, res) => {
+    try {
+        const { instanceId, threadId, messageId } = req.params;
+        const result = await instanceManager.getMessageById(instanceId, threadId, messageId);
+        res.json(result);
+    } catch (error) {
+        console.error('Erro ao obter mensagem por ID:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
 // Buscar usuário
 app.get('/api/instances/:instanceId/search-user', requireTokenAuth, async (req, res) => {
     try {
@@ -253,6 +250,21 @@ app.get('/api/logs', requireTokenAuth, async (req, res) => {
     } catch (error) {
         console.error('Erro ao obter logs:', error);
         res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// Obter instância específica (DEVE VIR POR ÚLTIMO para não capturar rotas específicas)
+app.get('/api/instances/:instanceId', requireTokenAuth, async (req, res) => {
+    try {
+        const instance = await instanceManager.getInstance(req.params.instanceId);
+        if (instance) {
+            res.json({ success: true, instance: instance });
+        } else {
+            res.status(404).json({ success: false, error: 'Instância não encontrada' });
+        }
+    } catch (error) {
+        console.error('Erro ao obter instância:', error);
+        res.status(500).json({ success: false, error: 'Erro interno do servidor' });
     }
 });
 

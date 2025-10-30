@@ -68,14 +68,15 @@ class InstanceManager {
         try {
             const instanceId = uuidv4();
             
-            // Criar no banco de dados
-            await this.database.createInstance(instanceId, name, username);
+            // Criar no banco de dados com senha
+            const createResult = await this.database.createInstance(name, username, password);
+            const actualInstanceId = createResult.instanceId;
             
             // Tentar conectar automaticamente
-            const connectResult = await this.connectInstance(instanceId, password);
+            const connectResult = await this.connectInstance(actualInstanceId, password);
             
             const instance = {
-                id: instanceId,
+                id: actualInstanceId,
                 name: name,
                 username: username,
                 status: connectResult.success ? 'connected' : 'disconnected',
@@ -86,7 +87,7 @@ class InstanceManager {
             };
 
             // Adicionar ao cache
-            this.instances.set(instanceId, instance);
+            this.instances.set(actualInstanceId, instance);
             
             console.log(`✅ Instância criada: ${name} (${username})`);
             return instance;
@@ -112,8 +113,9 @@ class InstanceManager {
                 // Criar cliente de mensagens
                 const messaging = new InstagramMessaging(auth.getIgClient());
                 
-                // Atualizar status no banco
+                // Atualizar status e senha no banco
                 await this.database.updateInstanceStatus(instanceId, 'connected');
+                await this.database.updateInstancePassword(instanceId, password);
                 
                 // Atualizar cache
                 instance.status = 'connected';
@@ -183,12 +185,65 @@ class InstanceManager {
                 throw new Error('Instância não está conectada');
             }
 
-            // Aqui você implementaria o envio de mensagem
-            // Por enquanto, retornar sucesso simulado
-            console.log(`📤 Mensagem enviada via ${instance.name}: ${recipient} - ${message}`);
-            return { success: true, message: 'Mensagem enviada com sucesso' };
+            // Buscar dados da instância no banco para obter credenciais
+            const instanceData = await this.database.getInstance(instanceId);
+            if (!instanceData) {
+                throw new Error('Dados da instância não encontrados');
+            }
+
+            if (!instanceData.password) {
+                throw new Error('Senha da instância não encontrada. Reconecte a instância.');
+            }
+
+            // Criar nova autenticação para esta instância
+            const auth = new InstagramAuth();
+            const loginResult = await auth.login(instanceData.username, instanceData.password);
+            
+            if (!loginResult.success) {
+                throw new Error(`Falha na autenticação: ${loginResult.message}`);
+            }
+
+            // Criar cliente de mensagens
+            const messaging = new InstagramMessaging(auth.getIgClient());
+            
+            // Buscar e enviar mensagem diretamente
+            const recipientStr = String(recipient).replace('@', '').trim();
+            console.log(`📤 Enviando mensagem para: ${recipientStr}`);
+            
+            // Buscar usuário usando a API do Instagram diretamente
+            const igClient = auth.getIgClient();
+            const user = await igClient.user.searchExact(recipientStr);
+            
+            if (!user || !user.pk) {
+                throw new Error(`Usuário ${recipientStr} não encontrado`);
+            }
+            
+            console.log(`✅ Usuário encontrado: ${user.username} (PK: ${user.pk})`);
+            
+            // Enviar mensagem diretamente
+            const thread = igClient.entity.directThread([user.pk.toString()]);
+            await thread.broadcastText(message);
+            
+            console.log(`✅ Mensagem enviada com sucesso!`);
+            const sendResult = { success: true, message: 'Mensagem enviada' };
+            
+            if (sendResult.success) {
+                console.log(`📤 Mensagem enviada via ${instance.name}: ${recipient} - ${message}`);
+                
+                // Atualizar última atividade da instância
+                await this.database.updateInstanceStatus(instanceId, 'connected');
+                
+                return { 
+                    success: true, 
+                    message: 'Mensagem enviada com sucesso',
+                    messageId: sendResult.messageId || null
+                };
+            } else {
+                throw new Error(`Falha ao enviar mensagem: ${sendResult.message}`);
+            }
         } catch (error) {
             console.error(`❌ Erro ao enviar mensagem via ${instanceId}:`, error);
+            console.error(`❌ Stack trace:`, error.stack);
             return { success: false, message: error.message };
         }
     }
@@ -205,9 +260,66 @@ class InstanceManager {
                 throw new Error('Instância não está conectada');
             }
 
-            // Aqui você implementaria a busca de conversas
-            // Por enquanto, retornar array vazio
-            return [];
+            // Buscar dados da instância no banco para obter credenciais
+            const instanceData = await this.database.getInstance(instanceId);
+            if (!instanceData) {
+                throw new Error('Dados da instância não encontrados');
+            }
+
+            if (!instanceData.password) {
+                throw new Error('Senha da instância não encontrada. Reconecte a instância.');
+            }
+
+            // Criar nova autenticação para esta instância
+            const auth = new InstagramAuth();
+            const loginResult = await auth.login(instanceData.username, instanceData.password);
+            
+            if (!loginResult.success) {
+                throw new Error(`Falha na autenticação: ${loginResult.message}`);
+            }
+
+            // Criar cliente de mensagens
+            const messaging = new InstagramMessaging(auth.getIgClient());
+            
+            // Buscar conversas usando a API do Instagram
+            const conversations = await messaging.getDirectMessages(50);
+            
+            // Formatar conversas para o frontend
+            const formattedConversations = conversations.map(thread => {
+                // Função para converter timestamp de forma segura
+                const safeTimestamp = (timestamp) => {
+                    if (!timestamp) return null;
+                    try {
+                        const date = new Date(timestamp * 1000);
+                        return isNaN(date.getTime()) ? null : date.toISOString();
+                    } catch (error) {
+                        console.warn('Erro ao converter timestamp:', timestamp, error);
+                        return null;
+                    }
+                };
+
+                return {
+                    id: thread.thread_id,
+                    participants: thread.users ? thread.users.map(user => ({
+                        id: user.pk,
+                        username: user.username,
+                        fullName: user.full_name,
+                        isPrivate: user.is_private,
+                        profilePicUrl: user.profile_pic_url
+                    })) : [],
+                    lastMessage: {
+                        text: thread.last_permanent_item?.text || '',
+                        timestamp: safeTimestamp(thread.last_activity_at),
+                        sender: thread.last_permanent_item?.user_id || null
+                    },
+                    unreadCount: thread.unseen_count || 0,
+                    isActive: thread.is_active || false,
+                    lastActivity: safeTimestamp(thread.last_activity_at)
+                };
+            });
+
+            console.log(`✅ Encontradas ${formattedConversations.length} conversas para instância ${instanceId}`);
+            return formattedConversations;
         } catch (error) {
             console.error(`❌ Erro ao obter conversas da instância ${instanceId}:`, error);
             throw error;
@@ -217,6 +329,12 @@ class InstanceManager {
     // Obter mensagens
     async getMessages(instanceId, threadId) {
         try {
+            if (!threadId || threadId === 'undefined') {
+                throw new Error('Thread ID inválido ou não fornecido');
+            }
+
+  
+            
             const instance = await this.getInstance(instanceId);
             if (!instance) {
                 throw new Error('Instância não encontrada');
@@ -226,15 +344,120 @@ class InstanceManager {
                 throw new Error('Instância não está conectada');
             }
 
-            // Aqui você implementaria a busca de mensagens
-            // Por enquanto, retornar array vazio
-            return [];
+            // Buscar dados da instância no banco para obter credenciais
+            const instanceData = await this.database.getInstance(instanceId);
+            if (!instanceData) {
+                throw new Error('Dados da instância não encontrados');
+            }
+
+            if (!instanceData.password) {
+                throw new Error('Senha da instância não encontrada. Reconecte a instância.');
+            }
+
+            // Criar nova autenticação para esta instância
+            const auth = new InstagramAuth();
+            const loginResult = await auth.login(instanceData.username, instanceData.password);
+            
+            if (!loginResult.success) {
+                throw new Error(`Falha na autenticação: ${loginResult.message}`);
+            }
+
+            // Usar a API do Instagram diretamente
+            const igClient = auth.getIgClient();
+            
+            // Buscar mensagens da thread específica
+            const threadFeed = igClient.feed.directThread({ thread_id: threadId });
+            const messages = await threadFeed.items();
+            
+            console.log(`💬 Encontradas ${messages.length} mensagens`);
+            
+            // Formatar mensagens para o frontend
+            const formattedMessages = messages.map(message => {
+                // Função para converter timestamp de forma segura
+                const safeTimestamp = (timestamp) => {
+                    if (!timestamp) return null;
+                    try {
+                        const date = new Date(timestamp / 1000000); // Instagram usa microssegundos
+                        return isNaN(date.getTime()) ? null : date.toISOString();
+                    } catch (error) {
+                        console.warn('Erro ao converter timestamp:', timestamp, error);
+                        return null;
+                    }
+                };
+
+                const isFromMe = message.user_id === igClient.state.cookieUserId?.toString();
+
+                return {
+                    id: message.item_id || message.id,
+                    text: message.text || '',
+                    timestamp: safeTimestamp(message.timestamp),
+                    sender: {
+                        id: message.user_id,
+                        username: message.username || 'unknown',
+                        fullName: message.full_name || 'Unknown User'
+                    },
+                    type: message.item_type || 'text',
+                    isFromMe: isFromMe,
+                    threadId: threadId,
+                    clientContext: message.client_context || null
+                };
+            });
+
+            console.log(`✅ Encontradas ${formattedMessages.length} mensagens para thread ${threadId}`);
+            return formattedMessages;
         } catch (error) {
             console.error(`❌ Erro ao obter mensagens da instância ${instanceId}:`, error);
             throw error;
         }
     }
 
+    // Obter mensagem por ID (com extração de mídia)
+    async getMessageById(instanceId, threadId, messageId) {
+        try {
+            if (!threadId || !messageId) {
+                throw new Error('Thread ID e Message ID são obrigatórios');
+            }
+
+            const instance = await this.getInstance(instanceId);
+            if (!instance) {
+                throw new Error('Instância não encontrada');
+            }
+
+            if (instance.status !== 'connected') {
+                throw new Error('Instância não está conectada');
+            }
+
+            const instanceData = await this.database.getInstance(instanceId);
+            if (!instanceData || !instanceData.password) {
+                throw new Error('Credenciais da instância indisponíveis. Reconecte a instância.');
+            }
+
+            const auth = new InstagramAuth();
+            const loginResult = await auth.login(instanceData.username, instanceData.password);
+            if (!loginResult.success) {
+                throw new Error(`Falha na autenticação: ${loginResult.message}`);
+            }
+
+            const messaging = new InstagramMessaging(auth.getIgClient());
+            const message = await messaging.getMessageById(String(threadId), String(messageId), 5);
+
+            // Normalizar resposta
+            return {
+                success: true,
+                message: {
+                    id: message.id,
+                    type: message.itemType,
+                    text: message.text,
+                    timestamp: message.timestamp,
+                    userId: message.userId,
+                    media: message.media || null
+                }
+            };
+        } catch (error) {
+            console.error(`❌ Erro ao obter mensagem ${messageId} da instância ${instanceId}:`, error);
+            throw error;
+        }
+    }
     // Buscar usuário
     async searchUser(instanceId, username) {
         try {

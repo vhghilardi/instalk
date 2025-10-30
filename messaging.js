@@ -31,11 +31,15 @@ class InstagramMessaging {
 
     async getMessagesFromThread(threadId, limit = 50) {
         try {
+            console.log(`\n🔍 getMessagesFromThread chamado com threadId: ${threadId}, tipo: ${typeof threadId}`);
+            
             if (!threadId || threadId === 'undefined') {
                 throw new Error('Thread ID inválido ou não fornecido');
             }
             
             console.log(`\n📬 Buscando mensagens da conversa ${threadId}...`);
+            
+            // Usar o método correto da biblioteca
             const threadFeed = this.ig.feed.directThread(threadId);
             const thread = await threadFeed.items();
             
@@ -56,6 +60,107 @@ class InstagramMessaging {
         } catch (error) {
             console.error('Erro ao buscar mensagens da conversa:', error.message);
             throw error;
+        }
+    }
+
+    async getMessageById(threadId, messageId, maxPages = 5) {
+        if (!threadId || !messageId) {
+            throw new Error('Thread ID e Message ID são obrigatórios');
+        }
+
+        const idStr = String(threadId).trim();
+        const msgIdStr = String(messageId).trim();
+
+        // Tenta com o formato que funcionou para listar mensagens ({ thread_id })
+        const tryFindInFeed = async (feed) => {
+            let page = 0;
+            while (page < maxPages) {
+                const items = await feed.items();
+                const found = items.find(it => String(it.item_id || it.id) === msgIdStr);
+                if (found) return this.formatSingleMessage(found);
+                if (typeof feed.isMoreAvailable === 'function' && !feed.isMoreAvailable()) break;
+                page += 1;
+            }
+            return null;
+        };
+
+        // Tentativa 1: objeto com thread_id
+        try {
+            const feedObj = this.ig.feed.directThread({ thread_id: idStr });
+            const result = await tryFindInFeed(feedObj);
+            if (result) return result;
+        } catch (e1) {
+            // continua para fallback
+        }
+
+        // Tentativa 2: string direta
+        try {
+            const feedStr = this.ig.feed.directThread(idStr);
+            const result = await tryFindInFeed(feedStr);
+            if (result) return result;
+        } catch (e2) {
+            // continua para fallback
+        }
+
+        // Tentativa 3: resolver thread real pelo inbox e usar seu thread_id
+        try {
+            const inbox = await this.ig.feed.directInbox().items();
+            const foundThread = inbox.find(t => String(t.thread_id || t.id || '') === idStr);
+            if (foundThread && foundThread.thread_id) {
+                const feedReal = this.ig.feed.directThread({ thread_id: String(foundThread.thread_id) });
+                const result = await tryFindInFeed(feedReal);
+                if (result) return result;
+            }
+        } catch (e3) {
+            // ignora
+        }
+
+        throw new Error('Mensagem não encontrada neste thread');
+    }
+
+    formatSingleMessage(message) {
+        // Extrair mídia quando aplicável
+        const media = this.extractMediaFromMessage(message);
+        const tsNum = Number(message.timestamp || message.taken_at || 0);
+        const ts = tsNum > 10000000000000 ? new Date(tsNum / 1000) : tsNum > 1000000000000 ? new Date(tsNum) : tsNum > 0 ? new Date(tsNum * 1000) : null;
+        return {
+            id: String(message.item_id || message.id),
+            itemType: message.item_type || 'unknown',
+            text: message.text || null,
+            timestamp: ts ? ts.toISOString() : null,
+            userId: message.user_id || null,
+            media
+        };
+    }
+
+    extractMediaFromMessage(message) {
+        try {
+            if (!message) return null;
+            const type = message.item_type;
+            if (type === 'media' && message.media) {
+                // imagem ou vídeo
+                const media = message.media;
+                const images = media.image_versions2?.candidates?.map(c => c.url) || [];
+                const videos = media.video_versions?.map(v => v.url) || [];
+                return { type: media.video_versions ? 'video' : 'image', images, videos };
+            }
+            if (type === 'raven_media' && message.raven_media) {
+                // mídia efêmera
+                const rm = message.raven_media;
+                const images = rm.image_versions2?.candidates?.map(c => c.url) || [];
+                const videos = rm.video_versions?.map(v => v.url) || [];
+                return { type: videos.length ? 'video_ephemeral' : 'image_ephemeral', images, videos };
+            }
+            if (type === 'animated_media' && message.animated_media?.images) {
+                const images = Object.values(message.animated_media.images).map(x => x.url).filter(Boolean);
+                return { type: 'animated', images, videos: [] };
+            }
+            if (type === 'link' && message.link) {
+                return { type: 'link', url: message.link.link_context?.link_url || message.link.text || null };
+            }
+            return null;
+        } catch (e) {
+            return null;
         }
     }
 
@@ -162,8 +267,15 @@ class InstagramMessaging {
 
     async searchUser(username) {
         try {
-            console.log(`\n🔍 Buscando usuário @${username}...`);
-            const user = await this.ig.user.searchExact(username);
+            // Garantir que username é uma string
+            if (!username || typeof username !== 'string') {
+                console.error(`❌ Username inválido:`, username, typeof username);
+                return { success: false, message: 'Username deve ser uma string' };
+            }
+            
+            const cleanUsername = username.replace('@', '').trim();
+            console.log(`\n🔍 Buscando usuário @${cleanUsername}...`);
+            const user = await this.ig.user.searchExact(cleanUsername);
             
             if (user) {
                 console.log(`\n👤 Usuário encontrado:`);
@@ -173,14 +285,16 @@ class InstagramMessaging {
                 console.log(`   Seguindo: ${user.following_count}`);
                 console.log(`   Posts: ${user.media_count}`);
                 console.log(`   Privado: ${user.is_private ? 'Sim' : 'Não'}`);
+                console.log(`   ID/PK: ${user.pk || user.id}`);
+                
+                return { success: true, user: user };
             } else {
                 console.log(`❌ Usuário @${username} não encontrado`);
+                return { success: false, message: `Usuário @${username} não encontrado` };
             }
-            
-            return user;
         } catch (error) {
             console.error('Erro ao buscar usuário:', error.message);
-            throw error;
+            return { success: false, message: error.message };
         }
     }
 

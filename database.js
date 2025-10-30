@@ -23,6 +23,7 @@ class Database {
                     id TEXT PRIMARY KEY,
                     name TEXT NOT NULL,
                     username TEXT NOT NULL,
+                    password TEXT,
                     status TEXT DEFAULT 'disconnected',
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                     last_activity DATETIME,
@@ -33,6 +34,17 @@ class Database {
             `, (err) => {
                 if (err) console.error('Erro ao criar tabela instances:', err);
                 else console.log('✅ Tabela instances criada');
+            });
+
+            // Adicionar coluna password se não existir (para bancos existentes)
+            this.db.run(`
+                ALTER TABLE instances ADD COLUMN password TEXT
+            `, (err) => {
+                if (err && !err.message.includes('duplicate column name')) {
+                    console.error('Erro ao adicionar coluna password:', err);
+                } else if (!err) {
+                    console.log('✅ Coluna password adicionada');
+                }
             });
 
             // Tabela de logs
@@ -77,12 +89,12 @@ class Database {
     }
 
     // Métodos de instâncias
-    async createInstance(name, username) {
+    async createInstance(name, username, password = null) {
         const instanceId = uuidv4();
         return new Promise((resolve, reject) => {
             this.db.run(
-                'INSERT INTO instances (id, name, username) VALUES (?, ?, ?)',
-                [instanceId, name, username],
+                'INSERT INTO instances (id, name, username, password) VALUES (?, ?, ?, ?)',
+                [instanceId, name, username, password],
                 function(err) {
                     if (err) {
                         reject(err);
@@ -148,6 +160,22 @@ class Database {
             this.db.run(
                 `UPDATE instances SET ${updates.join(', ')} WHERE id = ?`,
                 params,
+                function(err) {
+                    if (err) {
+                        reject(err);
+                        return;
+                    }
+                    resolve({ success: true });
+                }
+            );
+        });
+    }
+
+    async updateInstancePassword(instanceId, password) {
+        return new Promise((resolve, reject) => {
+            this.db.run(
+                'UPDATE instances SET password = ? WHERE id = ?',
+                [password, instanceId],
                 function(err) {
                     if (err) {
                         reject(err);
