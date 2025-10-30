@@ -1,197 +1,266 @@
-require('dotenv').config();
 const express = require('express');
 const session = require('express-session');
-const bodyParser = require('body-parser');
 const path = require('path');
-const InstagramAuth = require('./auth-alternative'); // Usando versão alternativa para evitar challenges
-const InstagramMessaging = require('./messaging');
+const cors = require('cors');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
+require('dotenv').config();
+
+const Database = require('./database');
+const InstanceManager = require('./instanceManager');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Configuração do EJS
-app.set('view engine', 'ejs');
-app.set('views', path.join(__dirname, 'views'));
+// Inicializar banco de dados e gerenciador de instâncias
+const database = new Database();
+const instanceManager = new InstanceManager(database);
 
-// Middleware
-app.use(bodyParser.urlencoded({ extended: true }));
-app.use(bodyParser.json());
-app.use(express.static(path.join(__dirname, 'public')));
+// Middleware de segurança
+app.use(helmet({
+    contentSecurityPolicy: {
+        directives: {
+            defaultSrc: ["'self'"],
+            styleSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com"],
+            scriptSrc: ["'self'", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com"],
+            scriptSrcAttr: ["'unsafe-inline'"],
+            fontSrc: ["'self'", "https://cdnjs.cloudflare.com"],
+            imgSrc: ["'self'", "data:", "https:"],
+            connectSrc: ["'self'"]
+        }
+    }
+}));
+app.use(cors());
+
+// Rate limiting
+const limiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutos
+    max: 100 // máximo 100 requests por IP
+});
+app.use(limiter);
+
+// Middleware para parsing
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// Configuração de sessão
 app.use(session({
-    secret: 'instagram-app-secret-key',
+    secret: process.env.SESSION_SECRET || 'instagram-manager-session-secret',
     resave: false,
     saveUninitialized: false,
     cookie: { secure: false, maxAge: 24 * 60 * 60 * 1000 } // 24 horas
 }));
 
-// Instâncias globais
-let instagramAuth = null;
-let instagramMessaging = null;
+// Configuração do EJS
+app.set('view engine', 'ejs');
+app.set('views', path.join(__dirname, 'views'));
 
-// Middleware para verificar autenticação
-const requireAuth = (req, res, next) => {
-    if (req.session.isLoggedIn && instagramAuth) {
-        next();
-    } else {
-        res.redirect('/');
+// Servir arquivos estáticos
+app.use(express.static(path.join(__dirname, 'public')));
+
+// Middleware para verificar token fixo
+const requireTokenAuth = (req, res, next) => {
+    const token = req.headers.authorization?.replace('Bearer ', '') || req.query.token;
+    
+    if (!token) {
+        return res.status(401).json({ success: false, error: 'Token de acesso necessário' });
     }
+
+    const authResult = database.verifyToken(token);
+    if (!authResult.success) {
+        return res.status(401).json({ success: false, error: authResult.message });
+    }
+    
+    next();
 };
 
-// Rota principal - Login
+// Rota principal - Dashboard
 app.get('/', (req, res) => {
-    if (req.session.isLoggedIn) {
-        return res.redirect('/dashboard');
-    }
-    res.render('login', { error: null });
+    res.render('dashboard', { 
+        title: 'Instagram Manager',
+        instances: [],
+        stats: {
+            total: 0,
+            connected: 0,
+            disconnected: 0
+        }
+    });
 });
 
-// Processar login
-app.post('/login', async (req, res) => {
-    const { username, password } = req.body;
-    
-    if (!username || !password) {
-        return res.render('login', { error: 'Username e senha são obrigatórios!' });
-    }
-    
+// Rota para obter token da API
+app.get('/api/token', (req, res) => {
+    const token = process.env.API_TOKEN || 'instagram-manager-token';
+    res.json({ success: true, token: token });
+});
+
+// ===== ROTAS DA API =====
+
+// Listar todas as instâncias
+app.get('/api/instances', requireTokenAuth, async (req, res) => {
     try {
-        instagramAuth = new InstagramAuth();
-        const loginResult = await instagramAuth.login(username, password);
-        
-        if (loginResult.success) {
-            req.session.isLoggedIn = true;
-            req.session.username = username;
-            instagramMessaging = new InstagramMessaging(instagramAuth.getIgClient());
-            res.redirect('/dashboard');
+        const instances = await instanceManager.getAllInstances();
+        res.json({ success: true, instances: instances });
+    } catch (error) {
+        console.error('Erro ao listar instâncias:', error);
+        res.status(500).json({ success: false, error: 'Erro interno do servidor' });
+    }
+});
+
+// Obter instância específica
+app.get('/api/instances/:instanceId', requireTokenAuth, async (req, res) => {
+    try {
+        const instance = await instanceManager.getInstance(req.params.instanceId);
+        if (instance) {
+            res.json({ success: true, instance: instance });
         } else {
-            // Renderizar com erro específico baseado no tipo
-            let errorMessage = loginResult.message || 'Falha no login. Verifique suas credenciais.';
-            
-            if (loginResult.error === 'challenge_required') {
-                errorMessage = `
-                    <strong>Verificação Adicional Necessária</strong><br>
-                    ${loginResult.message}<br><br>
-                    <strong>Soluções:</strong><br>
-                    1. Faça login no app oficial do Instagram<br>
-                    2. Complete qualquer verificação solicitada<br>
-                    3. Aguarde 10-15 minutos<br>
-                    4. Tente novamente aqui
-                `;
-            } else if (loginResult.error === 'rate_limit') {
-                errorMessage = `
-                    <strong>Limite de Tentativas Atingido</strong><br>
-                    ${loginResult.message}<br><br>
-                    Aguarde pelo menos 15 minutos antes de tentar novamente.
-                `;
-            }
-            
-            res.render('login', { error: errorMessage });
+            res.status(404).json({ success: false, error: 'Instância não encontrada' });
         }
     } catch (error) {
-        console.error('Erro no login:', error.message);
-        res.render('login', { error: 'Erro inesperado no login: ' + error.message });
+        console.error('Erro ao obter instância:', error);
+        res.status(500).json({ success: false, error: 'Erro interno do servidor' });
     }
 });
 
-// Dashboard principal
-app.get('/dashboard', requireAuth, async (req, res) => {
+// Criar nova instância
+app.post('/api/instances', requireTokenAuth, async (req, res) => {
     try {
-        // Buscar informações do usuário
-        const currentUser = await instagramMessaging.getCurrentUserInfo();
+        const { name, username, password } = req.body;
         
-        // Buscar conversas
-        const conversations = await instagramMessaging.getDirectMessagesData(10);
-        
-        res.render('dashboard', {
-            user: currentUser,
-            conversations: conversations,
-            username: req.session.username
-        });
-    } catch (error) {
-        console.error('Erro no dashboard:', error.message);
-        res.render('dashboard', {
-            user: null,
-            conversations: [],
-            username: req.session.username,
-            error: 'Erro ao carregar dados: ' + error.message
-        });
-    }
-});
-
-// API para buscar usuário
-app.post('/api/search-user', requireAuth, async (req, res) => {
-    const { username } = req.body;
-    
-    try {
-        const user = await instagramMessaging.searchUser(username);
-        res.json({ success: true, user: user });
-    } catch (error) {
-        res.json({ success: false, error: error.message });
-    }
-});
-
-// API para enviar mensagem
-app.post('/api/send-message', requireAuth, async (req, res) => {
-    const { recipient, message, type } = req.body;
-    
-    try {
-        let result;
-        if (type === 'username') {
-            result = await instagramMessaging.sendMessage(recipient, message);
-        } else if (type === 'thread') {
-            result = await instagramMessaging.sendMessageToThread(recipient, message);
+        if (!name || !username || !password) {
+            return res.status(400).json({ 
+                success: false, 
+                error: 'Nome, username e senha são obrigatórios' 
+            });
         }
-        
-        res.json({ success: true, result: result });
+
+        const instance = await instanceManager.createInstance(name, username, password);
+        res.json({ success: true, instance: instance });
     } catch (error) {
-        res.json({ success: false, error: error.message });
+        console.error('Erro ao criar instância:', error);
+        res.status(500).json({ success: false, error: error.message });
     }
 });
 
-// API para buscar mensagens de uma conversa
-app.get('/api/thread/:threadId/messages', requireAuth, async (req, res) => {
-    let { threadId } = req.params;
-    const limit = req.query.limit || 20;
-    
-    // Decodificar threadId
-    threadId = decodeURIComponent(threadId);
-    
-    // Validar threadId
-    if (!threadId || threadId === 'undefined' || threadId === 'null' || threadId.trim() === '') {
-        return res.json({ 
-            success: false, 
-            error: 'Thread ID inválido ou não fornecido' 
-        });
-    }
-    
-    console.log(`Buscando mensagens para thread: ${threadId}`);
-    
+// Conectar instância
+app.post('/api/instances/:instanceId/connect', requireTokenAuth, async (req, res) => {
     try {
-        const messages = await instagramMessaging.getMessagesFromThreadData(threadId, parseInt(limit));
+        const { password } = req.body;
+        const result = await instanceManager.connectInstance(req.params.instanceId, password);
+        res.json(result);
+    } catch (error) {
+        console.error('Erro ao conectar instância:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// Desconectar instância
+app.post('/api/instances/:instanceId/disconnect', requireTokenAuth, async (req, res) => {
+    try {
+        const result = await instanceManager.disconnectInstance(req.params.instanceId);
+        res.json(result);
+    } catch (error) {
+        console.error('Erro ao desconectar instância:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// Deletar instância
+app.delete('/api/instances/:instanceId', requireTokenAuth, async (req, res) => {
+    try {
+        const result = await instanceManager.deleteInstance(req.params.instanceId);
+        res.json(result);
+    } catch (error) {
+        console.error('Erro ao deletar instância:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// Enviar mensagem
+app.post('/api/instances/:instanceId/send-message', requireTokenAuth, async (req, res) => {
+    try {
+        const { recipient, message } = req.body;
+        const result = await instanceManager.sendMessage(req.params.instanceId, recipient, message);
+        res.json(result);
+    } catch (error) {
+        console.error('Erro ao enviar mensagem:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// Obter conversas
+app.get('/api/instances/:instanceId/conversations', requireTokenAuth, async (req, res) => {
+    try {
+        const conversations = await instanceManager.getConversations(req.params.instanceId);
+        res.json({ success: true, conversations: conversations });
+    } catch (error) {
+        console.error('Erro ao obter conversas:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// Obter mensagens de uma conversa
+app.get('/api/instances/:instanceId/threads/:threadId/messages', requireTokenAuth, async (req, res) => {
+    try {
+        const messages = await instanceManager.getMessages(req.params.instanceId, req.params.threadId);
         res.json({ success: true, messages: messages });
     } catch (error) {
-        console.error('Erro ao buscar mensagens:', error.message);
-        res.json({ success: false, error: error.message });
+        console.error('Erro ao obter mensagens:', error);
+        res.status(500).json({ success: false, error: error.message });
     }
 });
 
-// Logout
-app.post('/logout', requireAuth, async (req, res) => {
+// Buscar usuário
+app.get('/api/instances/:instanceId/search-user', requireTokenAuth, async (req, res) => {
     try {
-        if (instagramAuth) {
-            await instagramAuth.logout();
-        }
-        req.session.destroy();
-        instagramAuth = null;
-        instagramMessaging = null;
-        res.redirect('/');
+        const { username } = req.query;
+        const user = await instanceManager.searchUser(req.params.instanceId, username);
+        res.json({ success: true, user: user });
     } catch (error) {
-        console.error('Erro no logout:', error.message);
-        res.redirect('/');
+        console.error('Erro ao buscar usuário:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// Obter informações do usuário
+app.get('/api/instances/:instanceId/user-info', requireTokenAuth, async (req, res) => {
+    try {
+        const { userId } = req.query;
+        const userInfo = await instanceManager.getUserInfo(req.params.instanceId, userId);
+        res.json({ success: true, userInfo: userInfo });
+    } catch (error) {
+        console.error('Erro ao obter informações do usuário:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// Obter status da instância
+app.get('/api/instances/:instanceId/status', requireTokenAuth, async (req, res) => {
+    try {
+        const status = await instanceManager.getInstanceStatus(req.params.instanceId);
+        res.json({ success: true, status: status });
+    } catch (error) {
+        console.error('Erro ao obter status da instância:', error);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// Obter logs
+app.get('/api/logs', requireTokenAuth, async (req, res) => {
+    try {
+        const { level, limit = 100 } = req.query;
+        const logs = await database.getLogs(level, parseInt(limit));
+        res.json({ success: true, logs: logs });
+    } catch (error) {
+        console.error('Erro ao obter logs:', error);
+        res.status(500).json({ success: false, error: error.message });
     }
 });
 
 // Iniciar servidor
 app.listen(PORT, () => {
-    console.log(`🚀 Servidor rodando em http://localhost:${PORT}`);
-    console.log('📱 Acesse o navegador para usar a aplicação web');
+    console.log(`🚀 Instagram Manager rodando na porta ${PORT}`);
+    console.log(`🌐 Acesse: http://localhost:${PORT}`);
+    console.log(`🔑 Token da API: ${process.env.API_TOKEN || 'instagram-manager-token'}`);
 });
+
+module.exports = app;

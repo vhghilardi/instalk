@@ -3,36 +3,30 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Instagram Messaging - Dashboard</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <title><%= title || 'Instagram Manager' %></title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <link href="/css/style.css" rel="stylesheet">
 </head>
-<body class="bg-light">
+<body>
     <!-- Navbar -->
     <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
         <div class="container-fluid">
-            <a class="navbar-brand" href="#">
-                <i class="fab fa-instagram"></i>
-                Instagram Messaging
+            <a class="navbar-brand" href="/">
+                <i class="fas fa-instagram me-2"></i>Instagram Manager
             </a>
+            
             <div class="navbar-nav ms-auto">
-                <div class="nav-item dropdown">
+                <div class="dropdown">
                     <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
-                        <% if (user && user.profile_pic_url) { %>
-                            <img src="<%= user.profile_pic_url %>" class="rounded-circle me-2" width="25" height="25">
-                        <% } else { %>
-                            <i class="fas fa-user-circle me-2"></i>
-                        <% } %>
-                        @<%= username %>
+                        <i class="fas fa-cog"></i> Configurações
                     </a>
                     <ul class="dropdown-menu">
-                        <li><a class="dropdown-item" href="#" onclick="showUserInfo()">
-                            <i class="fas fa-info-circle"></i> Minhas Informações
+                        <li><a class="dropdown-item" href="#" id="showApiTokenBtn">
+                            <i class="fas fa-key"></i> Token da API
                         </a></li>
-                        <li><hr class="dropdown-divider"></li>
-                        <li><a class="dropdown-item" href="#" onclick="logout()">
-                            <i class="fas fa-sign-out-alt"></i> Logout
+                        <li><a class="dropdown-item" href="#" id="refreshInstancesBtn">
+                            <i class="fas fa-sync-alt"></i> Atualizar
                         </a></li>
                     </ul>
                 </div>
@@ -41,163 +35,178 @@
     </nav>
 
     <div class="container-fluid mt-4">
-        <div class="row">
-            <!-- Sidebar com conversas -->
+        <!-- Estatísticas -->
+        <div class="row mb-4">
             <div class="col-md-4">
-                <div class="card">
-                    <div class="card-header">
-                        <h5><i class="fas fa-comments"></i> Conversas Recentes</h5>
-                    </div>
-                    <div class="card-body p-0" style="max-height: 400px; overflow-y: auto;">
-                        <% if (conversations && conversations.length > 0) { %>
-                            <% conversations.forEach(function(conv) { %>
-                                <% if (conv.thread_id && conv.thread_id !== 'undefined' && conv.thread_id !== 'null') { %>
-                                <div class="conversation-item p-3 border-bottom" 
-                                     onclick="selectConversation('<%= conv.thread_id %>', '<%= conv.participants.map(p => p.username).join(', ') || 'Desconhecido' %>')"
-                                     data-thread-id="<%= conv.thread_id %>">
-                                    <div class="d-flex align-items-center">
-                                        <% if (conv.participants[0] && conv.participants[0].profile_pic_url) { %>
-                                            <img src="<%= conv.participants[0].profile_pic_url %>" 
-                                                 class="rounded-circle me-3" width="40" height="40">
-                                        <% } else { %>
-                                            <div class="bg-secondary rounded-circle me-3 d-flex align-items-center justify-content-center" 
-                                                 style="width: 40px; height: 40px;">
-                                                <i class="fas fa-user text-white"></i>
-                                            </div>
-                                        <% } %>
-                                        <div class="flex-grow-1">
-                                            <h6 class="mb-1"><%= conv.participants.map(p => p.username).join(', ') %></h6>
-                                            <p class="mb-1 text-muted small"><%= conv.last_message %></p>
-                                            <small class="text-muted"><%= conv.formatted_time %></small>
-                                        </div>
-                                    </div>
-                                </div>
-                                <% } %>
-                            <% }); %>
-                        <% } else { %>
-                            <div class="p-4 text-center text-muted">
-                                <i class="fas fa-inbox fa-2x mb-3"></i>
-                                <p>Nenhuma conversa encontrada</p>
+                <div class="card bg-primary text-white">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between">
+                            <div>
+                                <h4 class="card-title" id="totalInstances">0</h4>
+                                <p class="card-text">Total de Instâncias</p>
                             </div>
-                        <% } %>
+                            <div class="align-self-center">
+                                <i class="fas fa-layer-group fa-2x"></i>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
-
-            <!-- Área principal -->
-            <div class="col-md-8">
-                <!-- Enviar mensagem para usuário -->
-                <div class="card mb-4">
-                    <div class="card-header">
-                        <h5><i class="fas fa-paper-plane"></i> Enviar Mensagem</h5>
-                    </div>
+            <div class="col-md-4">
+                <div class="card bg-success text-white">
                     <div class="card-body">
-                        <div class="row">
-                            <div class="col-md-6">
-                                <div class="mb-3">
-                                    <label class="form-label">Buscar Usuário:</label>
-                                    <div class="input-group">
-                                        <input type="text" class="form-control" id="searchUsername" 
-                                               placeholder="Digite o username (sem @)">
-                                        <button class="btn btn-outline-secondary" onclick="searchUser()">
-                                            <i class="fas fa-search"></i>
-                                        </button>
-                                    </div>
-                                </div>
-                                <div id="userSearchResult" class="mb-3"></div>
+                        <div class="d-flex justify-content-between">
+                            <div>
+                                <h4 class="card-title" id="connectedInstances">0</h4>
+                                <p class="card-text">Conectadas</p>
                             </div>
-                            <div class="col-md-6">
-                                <div class="mb-3">
-                                    <label class="form-label">Ou usar Thread ID:</label>
-                                    <input type="text" class="form-control" id="threadId" 
-                                           placeholder="Thread ID da conversa">
-                                </div>
+                            <div class="align-self-center">
+                                <i class="fas fa-link fa-2x"></i>
                             </div>
-                        </div>
-                        
-                        <div class="mb-3">
-                            <label class="form-label">Mensagem:</label>
-                            <textarea class="form-control" id="messageText" rows="3" 
-                                      placeholder="Digite sua mensagem aqui..."></textarea>
-                        </div>
-                        
-                        <div class="d-flex gap-2">
-                            <button class="btn btn-primary" onclick="sendMessageToUser()">
-                                <i class="fas fa-user"></i> Enviar para Usuário
-                            </button>
-                            <button class="btn btn-success" onclick="sendMessageToThread()">
-                                <i class="fas fa-comments"></i> Enviar para Thread
-                            </button>
                         </div>
                     </div>
                 </div>
-
-                <!-- Área de mensagens -->
-                <div class="card">
-                    <div class="card-header d-flex justify-content-between align-items-center">
-                        <h5 id="conversationTitle"><i class="fas fa-comment-dots"></i> Selecione uma conversa</h5>
-                        <button class="btn btn-sm btn-outline-primary" id="refreshMessages" 
-                                onclick="refreshCurrentConversation()" style="display: none;">
-                            <i class="fas fa-sync-alt"></i> Atualizar
-                        </button>
-                    </div>
-                    <div class="card-body" id="messagesArea" style="height: 400px; overflow-y: auto;">
-                        <div class="text-center text-muted">
-                            <i class="fas fa-comment-slash fa-3x mb-3"></i>
-                            <p>Selecione uma conversa para ver as mensagens</p>
+            </div>
+            <div class="col-md-4">
+                <div class="card bg-secondary text-white">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between">
+                            <div>
+                                <h4 class="card-title" id="disconnectedInstances">0</h4>
+                                <p class="card-text">Desconectadas</p>
+                            </div>
+                            <div class="align-self-center">
+                                <i class="fas fa-unlink fa-2x"></i>
+                            </div>
                         </div>
                     </div>
                 </div>
             </div>
         </div>
+
+        <!-- Ações -->
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="d-flex justify-content-between align-items-center">
+                    <h2><i class="fas fa-mobile-alt me-2"></i>Instâncias do Instagram</h2>
+                    <div class="btn-group">
+                        <button class="btn btn-outline-secondary" id="refreshBtn" title="Atualizar">
+                            <i class="fas fa-sync-alt"></i>
+                        </button>
+                        <button class="btn btn-primary" id="newInstanceBtn">
+                            <i class="fas fa-plus"></i> Nova Instância
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Lista de Instâncias -->
+        <div class="row" id="instancesList">
+            <!-- Instâncias serão carregadas aqui via JavaScript -->
+        </div>
     </div>
 
-    <!-- Modal de informações do usuário -->
-    <div class="modal fade" id="userInfoModal" tabindex="-1">
+    <!-- Modal: Criar Instância -->
+    <div class="modal fade" id="createInstanceModal" tabindex="-1">
         <div class="modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title">Informações do Usuário</h5>
+                    <h5 class="modal-title">Nova Instância</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
-                <div class="modal-body" id="userInfoContent">
-                    <% if (user) { %>
-                        <div class="text-center mb-4">
-                            <% if (user.profile_pic_url) { %>
-                                <img src="<%= user.profile_pic_url %>" class="rounded-circle mb-3" width="80" height="80">
-                            <% } %>
-                            <h5><%= user.full_name %></h5>
-                            <p class="text-muted">@<%= user.username %></p>
+                <div class="modal-body">
+                    <form id="createInstanceForm">
+                        <div class="mb-3">
+                            <label for="instanceName" class="form-label">Nome da Instância</label>
+                            <input type="text" class="form-control" id="instanceName" required>
                         </div>
-                        <div class="row text-center">
-                            <div class="col-4">
-                                <h6><%= user.media_count %></h6>
-                                <small class="text-muted">Posts</small>
-                            </div>
-                            <div class="col-4">
-                                <h6><%= user.follower_count %></h6>
-                                <small class="text-muted">Seguidores</small>
-                            </div>
-                            <div class="col-4">
-                                <h6><%= user.following_count %></h6>
-                                <small class="text-muted">Seguindo</small>
-                            </div>
+                        <div class="mb-3">
+                            <label for="instanceUsername" class="form-label">Username do Instagram</label>
+                            <input type="text" class="form-control" id="instanceUsername" required>
                         </div>
-                    <% } %>
+                        <div class="mb-3">
+                            <label for="instancePassword" class="form-label">Senha do Instagram</label>
+                            <input type="password" class="form-control" id="instancePassword" required>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="button" class="btn btn-primary" id="createInstanceBtn">Criar Instância</button>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- Loading overlay -->
-    <div id="loadingOverlay" class="loading-overlay" style="display: none;">
-        <div class="spinner-border text-primary" role="status">
-            <span class="visually-hidden">Carregando...</span>
+    <!-- Modal: Conectar Instância -->
+    <div class="modal fade" id="connectInstanceModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Conectar Instância</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="connectInstanceForm">
+                        <input type="hidden" id="connectInstanceId">
+                        <div class="mb-3">
+                            <label for="connectPassword" class="form-label">Senha do Instagram</label>
+                            <input type="password" class="form-control" id="connectPassword" required>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="button" class="btn btn-success" id="connectInstanceBtn">Conectar</button>
+                </div>
+            </div>
         </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- Modal: Token da API -->
+    <div class="modal fade" id="apiTokenModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Token da API</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p>Use este token para acessar a API:</p>
+                    <div class="input-group">
+                        <input type="text" class="form-control" id="apiToken" readonly>
+                        <button class="btn btn-outline-secondary" type="button" id="copyTokenBtn">
+                            <i class="fas fa-copy"></i> Copiar
+                        </button>
+                    </div>
+                    <small class="text-muted">Este token é necessário para todas as requisições à API.</small>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Fechar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div id="loadingOverlay" class="position-fixed top-0 start-0 w-100 h-100 d-flex justify-content-center align-items-center" style="background: rgba(0,0,0,0.5); z-index: 9999; display: none;">
+        <div class="text-center">
+            <div class="spinner-border text-light mb-3" role="status">
+                <span class="visually-hidden">Carregando...</span>
+            </div>
+            <div class="text-light">
+                <p>Carregando...</p>
+                <button class="btn btn-warning btn-sm" id="forceStopBtn">
+                    <i class="fas fa-times"></i> Forçar Parar
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="/js/dashboard.js"></script>
+    <script src="/remove-spinner.js"></script>
 </body>
 </html>
-
