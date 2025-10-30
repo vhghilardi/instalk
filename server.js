@@ -270,6 +270,24 @@ app.listen(PORT, () => {
     console.log(`🌐 Acesse: http://localhost:${PORT}`);
     console.log(`🔑 Token da API: ${process.env.API_TOKEN || 'instagram-manager-token'}`);
     console.log(`🔗 Webhook: ${process.env.WEBHOOK_URL || 'https://seu-webhook-endpoint.exemplo.com/instagram'}`);
+
+    // Iniciar polling do webhook para instâncias já conectadas
+    (async () => {
+        try {
+            const instances = await database.getInstances();
+            const connected = instances.filter(i => i.status === 'connected');
+            console.log(`🔄 Iniciando polling para ${connected.length} instância(s) já conectada(s)...`);
+            connected.forEach(inst => {
+                try {
+                    instanceManager.startInboxPolling(inst.id);
+                } catch (e) {
+                    console.warn(`⚠️ Falha ao iniciar polling para ${inst.id}:`, e.message);
+                }
+            });
+        } catch (err) {
+            console.warn('⚠️ Não foi possível iniciar o polling inicial:', err.message);
+        }
+    })();
 });
 
 module.exports = app;

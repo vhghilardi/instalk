@@ -1,7 +1,7 @@
 const sqlite3 = require('sqlite3').verbose();
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const { v4: uuidv4 } = require('uuid');
+const { randomUUID } = require('crypto');
 const path = require('path');
 
 class Database {
@@ -90,7 +90,7 @@ class Database {
 
     // Métodos de instâncias
     async createInstance(name, username, password = null) {
-        const instanceId = uuidv4();
+        const instanceId = randomUUID();
         return new Promise((resolve, reject) => {
             this.db.run(
                 'INSERT INTO instances (id, name, username, password) VALUES (?, ?, ?, ?)',

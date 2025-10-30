@@ -1,4 +1,4 @@
-const { v4: uuidv4 } = require('uuid');
+const { randomUUID } = require('crypto');
 const InstagramAuth = require('./auth');
 const InstagramMessaging = require('./messaging');
 
@@ -69,7 +69,7 @@ class InstanceManager {
     // Criar nova instância
     async createInstance(name, username, password) {
         try {
-            const instanceId = uuidv4();
+            const instanceId = randomUUID();
             
             // Criar no banco de dados com senha
             const createResult = await this.database.createInstance(name, username, password);
