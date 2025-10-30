@@ -6,6 +6,9 @@ class InstanceManager {
     constructor(database) {
         this.database = database;
         this.instances = new Map(); // Cache de instâncias ativas
+        this.webhookUrl = process.env.WEBHOOK_URL || null;
+        this.inboxPollers = new Map(); // instanceId -> intervalId
+        this.lastSeenMessageIds = new Map(); // instanceId -> Set<string>
     }
 
     // Obter todas as instâncias
@@ -122,6 +125,9 @@ class InstanceManager {
                 instance.lastActivity = new Date().toISOString();
                 this.instances.set(instanceId, instance);
                 
+                // Iniciar polling do inbox para webhook
+                this.startInboxPolling(instanceId);
+
                 console.log(`✅ Instância conectada: ${instance.name}`);
                 return { success: true, message: 'Instância conectada com sucesso' };
             } else {
@@ -149,6 +155,9 @@ class InstanceManager {
                 this.instances.set(instanceId, instance);
             }
             
+            // Parar polling do inbox
+            this.stopInboxPolling(instanceId);
+            
             console.log(`✅ Instância desconectada: ${instanceId}`);
             return { success: true, message: 'Instância desconectada com sucesso' };
         } catch (error) {
@@ -170,6 +179,181 @@ class InstanceManager {
         } catch (error) {
             console.error(`❌ Erro ao deletar instância ${instanceId}:`, error);
             return { success: false, message: error.message };
+        }
+    }
+
+    // === Webhook: polling de novas mensagens recebidas ===
+    startInboxPolling(instanceId) {
+        if (!this.webhookUrl) {
+            console.log('ℹ️ WEBHOOK_URL não configurado. Polling não iniciado.');
+            return;
+        }
+        if (this.inboxPollers.has(instanceId)) {
+            return; // já ativo
+        }
+
+        const pollIntervalMs = 15000; // 15s
+        const runner = async () => {
+            try {
+                const startedAt = new Date();
+                console.log(`[Webhook][${instanceId}] ▶️ Poll tick iniciado às ${startedAt.toISOString()}`);
+                const instance = await this.getInstance(instanceId);
+                if (!instance || instance.status !== 'connected') return;
+
+                const instanceData = await this.database.getInstance(instanceId);
+                if (!instanceData || !instanceData.password) return;
+
+                const InstagramAuth = require('./auth');
+                const auth = new InstagramAuth();
+                const loginResult = await auth.login(instanceData.username, instanceData.password);
+                if (!loginResult.success) return;
+
+                const InstagramMessaging = require('./messaging');
+                const messaging = new InstagramMessaging(auth.getIgClient());
+                const inbox = await messaging.getDirectMessages(50); // retorna threads
+                console.log(`[Webhook][${instanceId}] 📥 Threads obtidos: ${inbox.length}`);
+
+                const seen = this.getSeenSet(instanceId);
+
+                for (const thread of inbox) {
+                    const lastItem = thread.last_permanent_item;
+                    if (!lastItem || !lastItem.item_id) continue;
+                    const messageId = String(lastItem.item_id);
+                    if (seen.has(messageId)) {
+                        // Mensagem já processada anteriormente
+                        // console.log(`[Webhook][${instanceId}] ⏩ Ignorando mensagem já vista: ${messageId}`);
+                        continue;
+                    }
+
+                    // Marcar como visto antes de postar para evitar duplicatas em caso de lentidão
+                    seen.add(messageId);
+
+                    const payload = this.buildWebhookPayload(instance, thread, lastItem);
+                    console.log(`[Webhook][${instanceId}] 🔔 Nova mensagem detectada -> thread=${payload.thread.id} msg=${payload.message.id} tipo=${payload.message.type}`);
+                    try {
+                        const payloadPreview = JSON.stringify(payload);
+                        console.log(`[Webhook][${instanceId}] 📦 Payload a enviar: ${payloadPreview}`);
+                    } catch (_) {
+                        console.log(`[Webhook][${instanceId}] 📦 Payload a enviar: [object não serializável]`);
+                    }
+                    await this.postToWebhook(payload);
+                }
+
+                // Limitar crescimento do set
+                if (seen.size > 1000) {
+                    // manter só os 500 mais recentes: recriar set
+                    const trimmed = Array.from(seen).slice(-500);
+                    this.lastSeenMessageIds.set(instanceId, new Set(trimmed));
+                    console.log(`[Webhook][${instanceId}] 🧹 Limpeza do cache de mensagens vistas (tamanho atual=${trimmed.length})`);
+                }
+                const finishedAt = new Date();
+                console.log(`[Webhook][${instanceId}] ✅ Poll tick concluído em ${(finishedAt - startedAt)}ms`);
+            } catch (err) {
+                console.warn(`⚠️ Polling inbox falhou para ${instanceId}:`, err.message);
+            }
+        };
+
+        const intervalId = setInterval(runner, pollIntervalMs);
+        this.inboxPollers.set(instanceId, intervalId);
+        // Executa uma vez imediatamente
+        runner();
+        console.log(`▶️ Polling de inbox iniciado para instância ${instanceId} (intervalo=${pollIntervalMs}ms)`);
+    }
+
+    stopInboxPolling(instanceId) {
+        const intervalId = this.inboxPollers.get(instanceId);
+        if (intervalId) {
+            clearInterval(intervalId);
+            this.inboxPollers.delete(instanceId);
+            console.log(`⏹️ Polling de inbox parado para instância ${instanceId}`);
+        }
+    }
+
+    getSeenSet(instanceId) {
+        if (!this.lastSeenMessageIds.has(instanceId)) {
+            this.lastSeenMessageIds.set(instanceId, new Set());
+        }
+        return this.lastSeenMessageIds.get(instanceId);
+    }
+
+    buildWebhookPayload(instance, thread, lastItem) {
+        const participants = (thread.users || []).map(u => ({
+            id: String(u.pk || u.id || ''),
+            username: u.username,
+            fullName: u.full_name,
+            profilePicUrl: u.profile_pic_url
+        }));
+        const tsNum = Number(lastItem.timestamp || thread.last_activity_at || Date.now());
+        const timestamp = tsNum > 10000000000000 ? new Date(tsNum / 1000).toISOString()
+                        : tsNum > 1000000000000 ? new Date(tsNum).toISOString()
+                        : new Date(tsNum * 1000).toISOString();
+        return {
+            event: 'instagram.new_message',
+            instance: {
+                id: instance.id,
+                name: instance.name,
+                username: instance.username
+            },
+            thread: {
+                id: String(thread.thread_id || thread.id || ''),
+                participants
+            },
+            message: {
+                id: String(lastItem.item_id || lastItem.id || ''),
+                type: lastItem.item_type || 'text',
+                text: lastItem.text || null,
+                timestamp,
+                userId: String(lastItem.user_id || '')
+            }
+        };
+    }
+
+    async postToWebhook(payload) {
+        try {
+            const url = this.webhookUrl;
+            if (!url) return;
+
+            const { URL } = require('url');
+            const parsed = new URL(url);
+            const isHttps = parsed.protocol === 'https:';
+            const mod = isHttps ? require('https') : require('http');
+
+            const body = JSON.stringify(payload);
+            const options = {
+                method: 'POST',
+                hostname: parsed.hostname,
+                port: parsed.port || (isHttps ? 443 : 80),
+                path: parsed.pathname + (parsed.search || ''),
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Content-Length': Buffer.byteLength(body)
+                }
+            };
+
+            await new Promise((resolve, reject) => {
+                const req = mod.request(options, res => {
+                    const status = res.statusCode || 0;
+                    let responseBody = '';
+                    res.on('data', (chunk) => { responseBody += chunk.toString(); });
+                    res.on('end', () => {
+                        if (status >= 200 && status < 300) {
+                            console.log(`📨 Webhook OK (status=${status})`);
+                        } else {
+                            console.warn(`⚠️ Webhook respondeu com status ${status}: ${responseBody?.slice(0, 200)}`);
+                        }
+                        resolve();
+                    });
+                });
+                req.on('error', (e) => {
+                    console.warn('⚠️ Erro ao enviar webhook (requisição):', e.message);
+                    reject(e);
+                });
+                req.write(body);
+                req.end();
+            });
+            // sucesso já logado acima pelo status 2xx
+        } catch (err) {
+            console.warn('⚠️ Falha ao enviar webhook:', err.message);
         }
     }
 

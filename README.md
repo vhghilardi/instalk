@@ -43,6 +43,7 @@ PORT=3000
 API_TOKEN=seu-token-personalizado-aqui
 SESSION_SECRET=seu-session-secret-aqui
 DB_PATH=./instagram_manager.db
+WEBHOOK_URL=https://seu-webhook-endpoint.exemplo.com/instagram
 ```
 
 4. **Inicie o servidor**
@@ -227,6 +228,10 @@ SESSION_SECRET=minha-chave-secreta-session
 
 # Caminho do banco de dados
 DB_PATH=./instagram_manager.db
+
+# URL de webhook para eventos (opcional)
+# Se definido, o sistema enviará POSTs quando novas mensagens forem recebidas
+WEBHOOK_URL=
 ```
 
 ### Banco de Dados
@@ -240,6 +245,21 @@ O sistema usa SQLite por padrão. O arquivo é criado automaticamente em `instag
 - **Token Fixo**: Configure um token forte e único
 - **HTTPS**: Use HTTPS em produção
 - **Firewall**: Configure regras de acesso adequadas
+
+### Webhook de Mensagens Recebidas
+- Se `WEBHOOK_URL` estiver definido, cada instância conectada inicia um polling periódico do inbox.
+- Ao detectar uma nova mensagem, o sistema envia um `POST` para `WEBHOOK_URL` com payload:
+
+```json
+{
+  "event": "instagram.new_message",
+  "instance": { "id": "...", "name": "...", "username": "..." },
+  "thread": { "id": "...", "participants": [{"id":"...","username":"..."}] },
+  "message": { "id": "...", "type": "text", "text": "...", "timestamp": "ISO", "userId": "..." }
+}
+```
+
+- Polling padrão: 15s. Ajuste no código se necessário.
 
 ## 📊 Monitoramento
 

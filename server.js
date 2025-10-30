@@ -269,6 +269,7 @@ app.listen(PORT, () => {
     console.log(`🚀 Instagram Manager rodando na porta ${PORT}`);
     console.log(`🌐 Acesse: http://localhost:${PORT}`);
     console.log(`🔑 Token da API: ${process.env.API_TOKEN || 'instagram-manager-token'}`);
+    console.log(`🔗 Webhook: ${process.env.WEBHOOK_URL || 'https://seu-webhook-endpoint.exemplo.com/instagram'}`);
 });
 
 module.exports = app;
