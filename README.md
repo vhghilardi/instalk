@@ -68,15 +68,7 @@ npm run dev
 
 ### Autenticação
 
-O sistema usa um token fixo configurado no arquivo `.env`. Use este token em todas as requisições:
-
-```bash
-# Obter o token configurado
-curl http://localhost:3000/api/token
-
-# Usar o token em requisições
-curl -H "Authorization: Bearer SEU_TOKEN" http://localhost:3000/api/instances
-```
+O sistema usa um token fixo configurado no arquivo `.env`. Use este token em todas as requisições via header `Authorization: Bearer`.
 
 ### Configuração do Token
 
@@ -106,6 +98,7 @@ npm start
 - `POST /api/instances/:id/send-message` - Enviar mensagem
 - `GET /api/instances/:id/conversations` - Listar conversas
 - `GET /api/instances/:id/threads/:threadId/messages` - Obter mensagens
+- `GET /api/instances/:id/threads/:threadId/messages/:messageId` - Obter mensagem específica por ID (inclui mídia quando houver)
 
 #### Usuários
 - `GET /api/instances/:id/search-user?username=USERNAME` - Buscar usuário
@@ -114,16 +107,10 @@ npm start
 #### Sistema
 - `GET /api/instances/:id/status` - Status da instância
 - `GET /api/logs` - Logs do sistema
-- `GET /api/token` - Obter token da API
 
 ### Exemplos de Uso com CURL
 
-#### 1. Obter Token da API
-```bash
-curl http://localhost:3000/api/token
-```
-
-#### 2. Listar Instâncias
+#### 1. Listar Instâncias
 ```bash
 curl -H "Authorization: Bearer SEU_TOKEN" \
   http://localhost:3000/api/instances
@@ -198,7 +185,13 @@ curl -H "Authorization: Bearer SEU_TOKEN" \
   "http://localhost:3000/api/instances/INSTANCE_ID/threads/THREAD_ID/messages"
 ```
 
-#### 12. Deletar Instância
+#### 12. Obter Mensagem por ID
+```bash
+curl -H "Authorization: Bearer SEU_TOKEN" \
+  "http://localhost:3000/api/instances/INSTANCE_ID/threads/THREAD_ID/messages/MESSAGE_ID"
+```
+
+#### 13. Deletar Instância
 ```bash
 curl -X DELETE http://localhost:3000/api/instances/INSTANCE_ID \
   -H "Authorization: Bearer SEU_TOKEN"
@@ -217,7 +210,7 @@ curl -H "Authorization: Bearer SEU_TOKEN" \
 3. **Crie instâncias** clicando em "Nova Instância"
 4. **Gerencie instâncias** através da interface intuitiva
 5. **Monitore logs** em tempo real
-6. **Obtenha seu token API** no menu de configurações
+6. **Insira seu token API** ao abrir o painel (modal bloqueante)
 
 ## 🔧 Configuração Avançada
 

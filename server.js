@@ -87,11 +87,7 @@ app.get('/', (req, res) => {
     });
 });
 
-// Rota para obter token da API
-app.get('/api/token', (req, res) => {
-    const token = process.env.API_TOKEN || 'instagram-manager-token';
-    res.json({ success: true, token: token });
-});
+// (Removido) Rota para obter token da API por motivos de segurança
 
 // ===== ROTAS DA API =====
 
