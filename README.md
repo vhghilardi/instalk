@@ -232,6 +232,31 @@ DB_PATH=./instagram_manager.db
 # URL de webhook para eventos (opcional)
 # Se definido, o sistema enviará POSTs quando novas mensagens forem recebidas
 WEBHOOK_URL=
+
+# Configuração de Proxy (opcional - ajuda a evitar problemas de autenticação)
+# Formato: protocolo://host:porta
+# Exemplo HTTP: http://proxy.example.com:8080
+# Exemplo HTTP com autenticação: http://user:pass@proxy.example.com:8080
+# Exemplo HTTPS: https://proxy.example.com:8080
+# Exemplo SOCKS5: socks5://proxy.example.com:1080
+# PROXY_URL=http://proxy.example.com:8080
+
+# Proxy rotacionado (opcional - múltiplos proxies separados por vírgula)
+# O sistema escolherá um proxy aleatório da lista a cada conexão
+# PROXY_URLS=http://proxy1.example.com:8080,http://proxy2.example.com:8080,socks5://proxy3.example.com:1080
+
+# Proxy Interno (simulação de proxy sem servidor - HABILITADO POR PADRÃO)
+# O proxy interno adiciona funcionalidades como retry automático, rate limiting,
+# cache, delays inteligentes e rotação de headers para evitar detecção
+USE_INTERNAL_PROXY=true
+
+# Configurações do Proxy Interno
+INTERNAL_PROXY_MAX_RETRIES=3
+INTERNAL_PROXY_RETRY_DELAY=2000
+INTERNAL_PROXY_REQ_PER_MIN=30
+INTERNAL_PROXY_REQ_PER_HOUR=1000
+INTERNAL_PROXY_CACHE=true
+INTERNAL_PROXY_LOGGING=true
 ```
 
 ### Banco de Dados
@@ -275,9 +300,9 @@ O sistema inclui logs detalhados para:
 - **Use apenas para fins educacionais**
 - **Respeite os termos de uso do Instagram**
 - **Não abuse da API para evitar bloqueios**
-- **Mantenha seu token seguro**
-- **Use proxies se necessário**
-- **Configure um token forte e único**
+- **Mantenha seu token seguro e configure um token forte e único**
+- **Use proxies se necessário** - Configure `PROXY_URL` ou `PROXY_URLS` no `.env` para evitar problemas de autenticação
+- **Proxy Interno** - O sistema inclui um proxy interno (habilitado por padrão) que adiciona retry automático, rate limiting, cache e delays inteligentes para melhorar a confiabilidade
 
 ## 🐛 Solução de Problemas
 
@@ -317,6 +342,26 @@ Contribuições são bem-vindas! Sinta-se à vontade para:
 - Sugerir funcionalidades
 - Enviar pull requests
 - Melhorar a documentação
+
+### 💰 Doação via PIX
+
+Se este projeto foi útil para você e você gostaria de contribuir financeiramente, aceitamos doações via PIX:
+
+**Chave PIX:**
+```
+f62052e3-d415-4d16-a687-d71e509f8bc1
+```
+
+**QR Code:**
+
+![QR Code PIX](https://api.qrserver.com/v1/create-qr-code/?size=300x300&format=png&data=00020126580014BR.GOV.BCB.PIX0136f62052e3-d415-4d16-a687-d71e509f8bc15204000053039865802BR5924Victor%20Henrique%20Baptista6009SAO%20PAULO62140510SAnOI0XtGs63045EA0)
+
+Você pode escanear o QR code acima com qualquer aplicativo bancário que suporte PIX ou copiar a chave PIX e fazer a transferência manualmente.
+
+**Beneficiário:** Victor Henrique Baptista  
+**Localização:** Rio Grande do Sul, RS
+
+Agradecemos qualquer contribuição! 🙏
 
 ## 📄 Licença
 

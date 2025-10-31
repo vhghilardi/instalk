@@ -1,15 +1,39 @@
 const { IgApiClient } = require('instagram-private-api');
 const fs = require('fs');
 const path = require('path');
+const ProxyConfig = require('./proxyConfig');
+const InternalProxy = require('./internalProxy');
 
 class InstagramAuthAlternative {
-    constructor() {
+    constructor(options = {}) {
         this.ig = new IgApiClient();
         this.sessionFile = path.join(__dirname, 'session.json');
+        this.options = options;
         this.setupAntiDetection();
     }
 
     setupAntiDetection() {
+        // Configurar proxy externo primeiro (se disponível)
+        const proxyUrl = ProxyConfig.getProxyFromEnv();
+        if (proxyUrl) {
+            ProxyConfig.setupProxy(this.ig, proxyUrl);
+        }
+
+        // Configurar proxy interno (simulação de proxy sem servidor)
+        const useInternalProxy = process.env.USE_INTERNAL_PROXY !== 'false';
+        if (useInternalProxy) {
+            this.internalProxy = new InternalProxy(this.ig, {
+                maxRetries: parseInt(process.env.INTERNAL_PROXY_MAX_RETRIES || '3'),
+                retryDelay: parseInt(process.env.INTERNAL_PROXY_RETRY_DELAY || '2000'),
+                requestsPerMinute: parseInt(process.env.INTERNAL_PROXY_REQ_PER_MIN || '30'),
+                requestsPerHour: parseInt(process.env.INTERNAL_PROXY_REQ_PER_HOUR || '1000'),
+                enableCache: process.env.INTERNAL_PROXY_CACHE !== 'false',
+                enableLogging: process.env.INTERNAL_PROXY_LOGGING !== 'false',
+                ...this.options.internalProxy
+            });
+            console.log('✅ Proxy interno configurado');
+        }
+
         // Configurar como um dispositivo "antigo" e confiável
         const deviceId = this.generateConsistentDeviceId();
         

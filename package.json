@@ -22,9 +22,12 @@
     "express-rate-limit": "^8.2.0",
     "express-session": "^1.17.3",
     "helmet": "^8.1.0",
+    "http-proxy-agent": "^4.0.1",
+    "https-proxy-agent": "^5.0.0",
     "instagram-private-api": "^1.45.3",
     "jsonwebtoken": "^9.0.2",
     "readline-sync": "^1.4.10",
+    "socks-proxy-agent": "^6.2.1",
     "sqlite3": "^5.1.7",
     "uuid": "^13.0.0"
   }

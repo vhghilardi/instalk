@@ -118,3 +118,5 @@ session.json
 # Build outputs
 build/
 dist/
+instanceManager.js
+session.json

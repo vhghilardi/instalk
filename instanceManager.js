@@ -75,14 +75,15 @@ class InstanceManager {
             const createResult = await this.database.createInstance(name, username, password);
             const actualInstanceId = createResult.instanceId;
             
-            // Tentar conectar automaticamente
-            const connectResult = await this.connectInstance(actualInstanceId, password);
+            // Instância criada sempre como desconectada
+            // A conexão deve ser feita manualmente pelo usuário via painel ou API
+            await this.database.updateInstanceStatus(actualInstanceId, 'disconnected');
             
             const instance = {
                 id: actualInstanceId,
                 name: name,
                 username: username,
-                status: connectResult.success ? 'connected' : 'disconnected',
+                status: 'disconnected',
                 createdAt: new Date().toISOString(),
                 lastActivity: new Date().toISOString(),
                 isActive: true,
@@ -92,7 +93,7 @@ class InstanceManager {
             // Adicionar ao cache
             this.instances.set(actualInstanceId, instance);
             
-            console.log(`✅ Instância criada: ${name} (${username})`);
+            console.log(`✅ Instância criada: ${name} (${username}) - Status: disconnected (conexão manual necessária)`);
             return instance;
         } catch (error) {
             console.error('❌ Erro ao criar instância:', error);
