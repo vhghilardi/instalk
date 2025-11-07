@@ -1,3 +1,124 @@
+function pickFirstUrl(list) {
+    if (!Array.isArray(list)) return null;
+    const candidate = list.find(item => item?.url) || list[0];
+    return candidate?.url || null;
+}
+
+function extractMediaFromMessage(message) {
+    try {
+        if (!message) return null;
+        const type = message.item_type;
+
+        if (type === 'media' && message.media) {
+            const media = message.media;
+            const images = media.image_versions2?.candidates?.map(c => c.url).filter(Boolean) || [];
+            const videos = media.video_versions?.map(v => v.url).filter(Boolean) || [];
+            return {
+                type: media.video_versions ? 'video' : 'image',
+                url: media.video_versions ? pickFirstUrl(media.video_versions) : pickFirstUrl(media.image_versions2?.candidates),
+                images,
+                videos,
+                preview: media.thumbnail_url || media.preview || null
+            };
+        }
+
+        if (type === 'raven_media' || type === 'visual_media') {
+            const rm = message.raven_media || message.visual_media || null;
+            const container = rm?.media || rm?.visual_media || rm || null;
+            const imageCandidates = container?.image_versions2?.candidates
+                || container?.images?.map?.(img => ({ url: img }))
+                || [];
+            const videoCandidates = container?.video_versions
+                || container?.videos
+                || container?.dash_manifest?.videos
+                || [];
+            const images = Array.isArray(imageCandidates) ? imageCandidates.map(c => c?.url).filter(Boolean) : [];
+            const videos = Array.isArray(videoCandidates) ? videoCandidates.map(v => v?.url || v?.src).filter(Boolean) : [];
+            const expiresAtSeconds = rm?.expiring_at || container?.expiring_at || container?.expiry || null;
+            const playbackUrl = container?.playback_url
+                || container?.direct_viewer_url
+                || container?.video_dash_manifest
+                || container?.streaming_url
+                || container?.url
+                || null;
+            return {
+                type: videos.length ? 'video_ephemeral' : 'image_ephemeral',
+                url: videos.length ? pickFirstUrl(videoCandidates) || playbackUrl : pickFirstUrl(imageCandidates) || playbackUrl,
+                expiresAt: expiresAtSeconds ? new Date(Number(expiresAtSeconds) * 1000).toISOString() : null,
+                images,
+                videos,
+                preview: container?.thumbnail_url || container?.preview || container?.cover_frame_url || null
+            };
+        }
+
+        if (type === 'animated_media' && message.animated_media?.images) {
+            const images = Object.values(message.animated_media.images)
+                .map(x => x?.url)
+                .filter(Boolean);
+            return {
+                type: 'animated',
+                url: pickFirstUrl(Object.values(message.animated_media.images)),
+                images,
+                videos: []
+            };
+        }
+
+        if (type === 'link' && message.link) {
+            return { type: 'link', url: message.link.link_context?.link_url || message.link.text || null };
+        }
+
+        if (type === 'voice_media' && message.voice_media) {
+            const voiceMedia = message.voice_media;
+            const media = voiceMedia.media || voiceMedia;
+            const audio = media.audio || voiceMedia.audio || null;
+
+            const url = audio?.audio_src
+                || audio?.audio
+                || audio?.audio_url
+                || audio?.url
+                || media.audio_src
+                || media.url
+                || media.playback_url
+                || null;
+
+            const durationMs = typeof audio?.duration_ms === 'number' ? audio.duration_ms
+                : typeof audio?.duration_in_ms === 'number' ? audio.duration_in_ms
+                : typeof audio?.duration === 'number' ? Math.round(audio.duration * 1000)
+                : typeof voiceMedia.duration_ms === 'number' ? voiceMedia.duration_ms
+                : typeof voiceMedia.duration === 'number' ? Math.round(voiceMedia.duration * 1000)
+                : null;
+
+            const durationSeconds = durationMs != null ? durationMs / 1000
+                : typeof audio?.duration === 'number' ? audio.duration
+                : typeof voiceMedia.duration === 'number' ? voiceMedia.duration
+                : null;
+
+            const waveform = Array.isArray(audio?.waveform) ? audio.waveform
+                : Array.isArray(voiceMedia.waveform) ? voiceMedia.waveform
+                : Array.isArray(media.waveform) ? media.waveform
+                : null;
+
+            const codec = audio?.codec || media.codec || null;
+            const samplingRate = audio?.sampling_rate || audio?.samplingFrequency || null;
+
+            return {
+                type: 'voice',
+                url,
+                durationMs,
+                durationSeconds,
+                waveform,
+                codec,
+                samplingRate,
+                preview: media.waveform_visualization || null
+            };
+        }
+
+        return null;
+    } catch (_) {
+        return null;
+    }
+}
+
 class InstagramMessaging {
     constructor(igClient) {
         this.ig = igClient;
@@ -120,7 +241,7 @@ class InstagramMessaging {
 
     formatSingleMessage(message) {
         // Extrair mídia quando aplicável
-        const media = this.extractMediaFromMessage(message);
+        const media = extractMediaFromMessage(message);
         const tsNum = Number(message.timestamp || message.taken_at || 0);
         const ts = tsNum > 10000000000000 ? new Date(tsNum / 1000) : tsNum > 1000000000000 ? new Date(tsNum) : tsNum > 0 ? new Date(tsNum * 1000) : null;
         return {
@@ -134,34 +255,7 @@ class InstagramMessaging {
     }
 
     extractMediaFromMessage(message) {
-        try {
-            if (!message) return null;
-            const type = message.item_type;
-            if (type === 'media' && message.media) {
-                // imagem ou vídeo
-                const media = message.media;
-                const images = media.image_versions2?.candidates?.map(c => c.url) || [];
-                const videos = media.video_versions?.map(v => v.url) || [];
-                return { type: media.video_versions ? 'video' : 'image', images, videos };
-            }
-            if (type === 'raven_media' && message.raven_media) {
-                // mídia efêmera
-                const rm = message.raven_media;
-                const images = rm.image_versions2?.candidates?.map(c => c.url) || [];
-                const videos = rm.video_versions?.map(v => v.url) || [];
-                return { type: videos.length ? 'video_ephemeral' : 'image_ephemeral', images, videos };
-            }
-            if (type === 'animated_media' && message.animated_media?.images) {
-                const images = Object.values(message.animated_media.images).map(x => x.url).filter(Boolean);
-                return { type: 'animated', images, videos: [] };
-            }
-            if (type === 'link' && message.link) {
-                return { type: 'link', url: message.link.link_context?.link_url || message.link.text || null };
-            }
-            return null;
-        } catch (e) {
-            return null;
-        }
+        return extractMediaFromMessage(message);
     }
 
     async sendMessage(recipientUsername, message) {
@@ -534,16 +628,33 @@ class InstagramMessaging {
             } else if (message.taken_at) {
                 timestamp = new Date(Number(message.taken_at) * 1000);
             }
-            
+
+            const media = extractMediaFromMessage(message);
+            let text = message.text;
+            if (!text) {
+                if (media) {
+                    if (media.type === 'voice') {
+                        text = '[Mensagem de áudio]';
+                    } else if (media.type) {
+                        text = `[${media.type}]`;
+                    }
+                }
+            }
+            if (!text) {
+                text = message.item_type || '[Mídia]';
+            }
+
             return {
-                text: message.text || message.item_type || '[Mídia]',
+                text,
                 is_from_me: isFromMe,
                 timestamp: timestamp,
                 formatted_time: timestamp.toLocaleString('pt-BR'),
-                user_id: userId
+                user_id: userId,
+                media
             };
         });
     }
 }
 
 module.exports = InstagramMessaging;
+InstagramMessaging.extractMediaFromMessage = extractMediaFromMessage;

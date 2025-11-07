@@ -288,6 +288,17 @@ class InstanceManager {
         const timestamp = tsNum > 10000000000000 ? new Date(tsNum / 1000).toISOString()
                         : tsNum > 1000000000000 ? new Date(tsNum).toISOString()
                         : new Date(tsNum * 1000).toISOString();
+        const media = typeof InstagramMessaging.extractMediaFromMessage === 'function'
+            ? InstagramMessaging.extractMediaFromMessage(lastItem)
+            : null;
+        let messageText = lastItem.text || null;
+        if (!messageText && media) {
+            if (media.type === 'voice') {
+                messageText = '[Mensagem de áudio]';
+            } else if (media.type) {
+                messageText = `[${media.type}]`;
+            }
+        }
         return {
             event: 'instagram.new_message',
             instance: {
@@ -302,9 +313,10 @@ class InstanceManager {
             message: {
                 id: String(lastItem.item_id || lastItem.id || ''),
                 type: lastItem.item_type || 'text',
-                text: lastItem.text || null,
+                text: messageText,
                 timestamp,
-                userId: String(lastItem.user_id || '')
+                userId: String(lastItem.user_id || ''),
+                media
             }
         };
     }
